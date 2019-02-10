@@ -12,13 +12,13 @@
 # 
 # SETTINGS:
 
-SMTPSERVER='[server]]:[port]'
-IMAPSERVER='[server]]:[port]'
-EMAILFROM='[mailtest@domain]'
-EMAILFROMPASSWORD='[password]]'
-EMAILTO='[emailaddress]'
+SMTPSERVER='[server]:[port]'
+IMAPSERVER='[server]:[port]'
+EMAILFROM='[mailtest@example.com]'
+EMAILFROMPASSWORD='[password]'
+EMAILTO='[mailtest@gmail.com]'
 
-MAXWAIT=300 # Send alert if email not received in xx seconds
+MAXWAIT=300 # Send alert when email not received within xx seconds
 
 # Pushover settings: https://pushover.net/api
 POUSERKEY='[pushover user key]'
