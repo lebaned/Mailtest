@@ -10,21 +10,26 @@
 # 3. Script checks every 5 seconds if the email is received
 # 4. Gives a alert via Pushover if needed
 # 
+# cron: 0 11 * * * "/path/to/mailtest.sh" >> /var/log/mailtest.log
+#
 # SETTINGS:
 
-SMTPSERVER='[server]:[port]'
-IMAPSERVER='[server]:[port]'
-EMAILFROM='[mailtest@example.com]'
+SMTPSERVER='[server:port]'
+IMAPSERVER='[server:port]'
+EMAILFROM='[email@from.com]'
 EMAILFROMPASSWORD='[password]'
-EMAILTO='[mailtest@gmail.com]'
+EMAILTO='[email@to.com]'
+SSLVERIFY='strict' # strict or ignore
+CONNECTIONMETHOD='tls' # starttls or tls
 
-MAXWAIT=300 # Send alert when email not received within xx seconds
+MAXWAIT=300 # Send alert if email not received in xx seconds
 
 # Pushover settings: https://pushover.net/api
-POUSERKEY='[pushover user key]'
-POTOKEN='[pushover application token]'
-POMESSAGE='Er is een probleem met je mail!!'
-PODEVICE=''
+POUSER='[Pushover user key]'
+POTOKEN='[Pushover application token]'
+POTITLE='Mailtest'
+PODEVICES=''
+POSENDALWAYS='false' # Send message if everything is OK. 
 
 SNAIL=/usr/local/bin/s-nail
 
@@ -48,6 +53,28 @@ rawurlencode() {
     encoded+="${o}"
   done
   echo "${encoded}"
+}
+
+sendpushovermessage() {
+  local message="${1}"
+
+  result=$((curl -s \
+  --form-string "token=$POTOKEN" \
+  --form-string "user=$POUSER" \
+  --form-string "device=$PODEVICES" \
+  --form-string "title=$POTITLE" \
+  --form-string "message=$message" \
+  https://api.pushover.net/1/messages.json) 2>&1)
+  errorlevel=$?
+    
+  debug "Error code: $errorlevel"
+
+  if [ $errorlevel -eq 0 ]; then
+    info "Pushover API called. Result: $result"
+  else
+    error "Error by curl. Error code: '$errorlevel'. Message: $result"
+  fi
+
 }
 
 log() {
@@ -83,25 +110,34 @@ EMAILFROMPASSWORDENC=$(rawurlencode $EMAILFROMPASSWORD)
 
 debug "Sending email.."
 
+if [ "$CONNECTIONMETHOD" == "starttls" ]; then
+  connectionvar="-S smtp-use-starttls"
+  protocol="smtp://"
+else
+  connectionvar=""
+  protocol="smtps://"
+fi
+
 result=$((echo $RND | $SNAIL \
 -r $EMAILFROM \
 -s "Testmail" \
--S smtp=$SMTPSERVER \
--S smtp-use-starttls \
+-S smtp=$protocol$SMTPSERVER \
+$connectionvar \
 -S smtp-auth=login \
 -S smtp-auth-user=$EMAILFROM \
 -S smtp-auth-password=$EMAILFROMPASSWORD \
--S ssl-verify=ignore \
+-S ssl-verify=$SSLVERIFY \
 $EMAILTO) 2>&1)
 errorlevel=$?
 
 debug "Result: '$result'. Error code: $errorlevel"
 
 if [ $errorlevel -ne 0 ]; then
-  error "Email couldn't be sent. S-nail returned with error code $errorlevel. Message: $result"
+  error "Test email couldn't be sent. S-nail returned with error code $errorlevel. Message: $result"
+  sendpushovermessage "Test email couldn't be sent. Check the logging for details"
   exit
 else
-  info "Email successfully sent with body: $RND"
+  info "Email successfully sent with body '$RND'"
 fi
 
 
@@ -109,16 +145,25 @@ EMAILFOUND="false"
 
 loops=($MAXWAIT+4)/5
 
-for i in {1..3}
+if [ "$CONNECTIONMETHOD" == "starttls" ]; then
+  connectionvar="-S imap-use-starttls"
+  protocol="imap://"
+else
+  connectionvar=""
+  protocol="imaps://"
+fi
+
+for i in {1..60}
 do
   sleep 5
     
   debug "Checking inbox"
 
   result=$(($SNAIL \
-  -S MAIL=imap://$EMAILFROMENC:$EMAILFROMPASSWORDENC@$IMAPSERVER \
-  -S imap-use-starttls \
+  -S MAIL=$protocol$EMAILFROMENC:$EMAILFROMPASSWORDENC@$IMAPSERVER \
+  $connectionvar \
   -S v15-compat=true \
+  -S ssl-verify=$SSLVERIFY \
   -e -L "@body@$RND") 2>&1)
   errorlevel=$?
 
@@ -126,6 +171,7 @@ do
 
   if [ ! -z "$result" ]; then
     error "S-nail returned with error code $errorlevel. Message: $result"
+    sendpushovermessage "S-nail returned an error. Check the logging for details"
     exit
   elif [ $errorlevel -eq 0 ]; then
     EMAILFOUND="true"
@@ -138,22 +184,10 @@ NOW=$(date "+%Y-%m-%d %T")
 
 if [ "$EMAILFOUND" == "true" ]; then
   info "Email received, everything's OK"
+  if [ "$POSENDALWAYS" == "true" ]; then
+    sendpushovermessage "Email received, everything's OK"
+  fi
 else
   error "Email not received. Sending message via Pushover.."
-  exit
-  result=$((curl -s \
-  --form-string "token=$POTOKEN" \
-  --form-string "user=$POUSERKEY" \
-  --form-string "device=$PODEVICE" \
-  --form-string "message=$POMESSAGE" \
-  https://api.pushover.net/1/messages.json) 2>&1)
-  errorlevel=$?
-    
-  debug "Error code: $errorlevel"
-
-  if [ $errorlevel -eq 0 ]; then
-    info "Pushover API called. Result: $result"
-  else
-    error "Error by curl. Error code: '$errorlevel'. Message: $result"
-  fi
+  sendpushovermessage "Test email not received!"
 fi
