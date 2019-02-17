@@ -143,8 +143,6 @@ fi
 
 EMAILFOUND="false"
 
-loops=($MAXWAIT+4)/5
-
 if [ "$CONNECTIONMETHOD" == "starttls" ]; then
   connectionvar="-S imap-use-starttls"
   protocol="imap://"
@@ -153,7 +151,7 @@ else
   protocol="imaps://"
 fi
 
-for i in {1..60}
+for (( i=0; i<=$MAXWAIT; i+=5 ))
 do
   sleep 5
     
